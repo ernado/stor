@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 5s
+  scrape_timeout: 2s
+  evaluation_interval: 5s
+
+alerting:
+
+storage:
+  tsdb:
+    out_of_order_time_window: 30m
+
+otlp:
+  promote_resource_attributes:
+    - service.instance.id
+    - service.name
+    - service.namespace
+
+scrape_configs: []
+
+tracing:
+  endpoint: otelcol:4317
+  insecure: true
