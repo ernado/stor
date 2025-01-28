@@ -5,12 +5,31 @@ volumes:
   ydb_certs:
 
 services:
-  # storage node
+  # frontend (REST API) node
+  front:
+    build:
+      context: .
+      dockerfile: front.Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - OTEL_LOG_LEVEL=debug
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_EXPORTER_OTLP_INSECURE=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4317
+      - OTEL_GO_X_DEPRECATED_RUNTIME_METRICS=false
+      - OTEL_GO_X_RESOURCE=true
+      - OTEL_METRIC_EXPORT_INTERVAL=5000
+      - OTEL_METRIC_EXPORT_TIMEOUT=2500
+
+  # storage nodes
   node:
-    scale: 8
+    scale: 16
     build:
       context: .
       dockerfile: node.Dockerfile
+    depends_on:
+      - front
     environment:
       - OTEL_LOG_LEVEL=debug
       - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
@@ -46,7 +65,9 @@ services:
   # * Grafana Loki  <------|
   # * Grafana Tempo <---|  |
   # * Prometheus  <--|  |  |
-  # * OpenTelemetry Collector
+  # * OpenTelemetry Collector <--|
+  #       stor-node-n------------|
+  #       stor-front-------------|
 
   prometheus:
     image: "ghcr.io/go-faster/prom/prometheus:v3.1.0"
@@ -106,7 +127,6 @@ services:
       - "3000:3000"
     volumes:
       - ./_hack/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
-      - ./_hack/grafana/grafana.ini:/etc/grafana/grafana.ini
       - ./_hack/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/default.yml
       - ./_hack/grafana/dashboards:/etc/grafana/dashboards:ro
     depends_on:
