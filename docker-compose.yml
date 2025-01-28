@@ -102,7 +102,6 @@ services:
       - GF_ALERTING_ENABLED=false
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_LOG_LEVEL=debug
-      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
     ports:
       - "3000:3000"
     volumes:
