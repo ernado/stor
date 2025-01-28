@@ -5,6 +5,13 @@ volumes:
   ydb_certs:
 
 services:
+  # storage node
+  node:
+    scale: 8
+    build:
+      context: .
+      dockerfile: node.Dockerfile
+
   # Database for metadata
   # https://ydb.tech/docs/ru/quickstart
   ydb:

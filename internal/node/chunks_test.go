@@ -12,18 +12,21 @@ import (
 	noopTracer "go.opentelemetry.io/otel/trace/noop"
 )
 
+func randomData(t testing.TB, n int) []byte {
+	source := rand.NewSource(10)
+	rnd := rand.New(source)
+	data := make([]byte, n)
+	if _, err := rnd.Read(data); err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
 func TestChunks(t *testing.T) {
 	chunks, err := NewChunks(t.TempDir(), noopTracer.NewTracerProvider(), noopMeter.NewMeterProvider())
 	require.NoError(t, err)
 
-	// Prepare random data.
-	source := rand.NewSource(10)
-	rnd := rand.New(source)
-	data := make([]byte, 1024)
-	if _, err := rnd.Read(data); err != nil {
-		t.Fatal(err)
-	}
-
+	data := randomData(t, 1024)
 	ctx := context.Background()
 	id := uuid.New()
 	require.NoError(t, chunks.Write(ctx, id, bytes.NewReader(data)), "write")
