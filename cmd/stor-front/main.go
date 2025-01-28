@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -104,7 +105,12 @@ func main() {
 						return "http.Register"
 					case "/upload":
 						return "http.Upload"
+					case "/health":
+						return "http.Health"
 					default:
+						if strings.HasPrefix(r.URL.Path, "/download/") {
+							return "http.Download"
+						}
 						return ""
 					}
 				}),

@@ -23,14 +23,19 @@ func main() {
 			return errors.Wrap(err, "init chunks")
 		}
 		const listenPort = "8080"
+		handler := node.NewHandler(chunks)
+		// Initialize and instrument http server.
 		srv := &http.Server{
 			Addr:        ":" + listenPort,
 			BaseContext: func(listener net.Listener) context.Context { return ctx },
-			Handler: otelhttp.NewHandler(node.NewHandler(chunks), "",
+			Handler: otelhttp.NewHandler(handler, "",
 				otelhttp.WithTracerProvider(m.TracerProvider()),
 				otelhttp.WithMeterProvider(m.MeterProvider()),
 				otelhttp.WithPropagators(m.TextMapPropagator()),
 				otelhttp.WithSpanNameFormatter(func(operation string, r *http.Request) string {
+					if r.URL.Path == "/health" {
+						return "http.Health"
+					}
 					switch r.Method {
 					case http.MethodGet:
 						return "http.ChunksGet"
@@ -48,6 +53,7 @@ func main() {
 			_ = srv.Shutdown(context.Background())
 		}()
 		go func() {
+			// Use instrumented http client to register node in front.
 			httpClient := &http.Client{
 				Transport: otelhttp.NewTransport(http.DefaultTransport,
 					otelhttp.WithTracerProvider(m.TracerProvider()),
