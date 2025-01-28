@@ -29,6 +29,53 @@ type YDBStorage struct {
 }
 
 func (y YDBStorage) RemoveFile(ctx context.Context, name string) error {
+	ctx, span := y.tracer.Start(ctx, "meta.RemoveFile")
+	defer span.End()
+
+	if err := y.db.Table().DoTx(ctx,
+		func(ctx context.Context, tx table.TransactionActor) (err error) {
+			res, err := tx.Execute(ctx, `DECLARE $fileName AS UTF8;
+			DELETE FROM files
+			WHERE
+			  name = $fileName;`,
+				table.NewQueryParameters(
+					table.ValueParam("$fileName", types.UTF8Value(name)),
+				),
+			)
+			if err != nil {
+				return errors.Wrap(err, "execute")
+			}
+			if err = res.Err(); err != nil {
+				return errors.Wrap(err, "result")
+			}
+			if err := res.Close(); err != nil {
+				return errors.Wrap(err, "close")
+			}
+
+			res, err = tx.Execute(ctx, `DECLARE $fileName AS UTF8;
+			DELETE FROM chunks
+			WHERE
+			  file = $fileName;`,
+				table.NewQueryParameters(
+					table.ValueParam("$fileName", types.UTF8Value(name)),
+				),
+			)
+			if err != nil {
+				return errors.Wrap(err, "execute")
+			}
+			if err = res.Err(); err != nil {
+				return errors.Wrap(err, "result")
+			}
+			if err := res.Close(); err != nil {
+				return errors.Wrap(err, "close")
+			}
+
+			return nil
+		}, table.WithIdempotent(),
+	); err != nil {
+		return errors.Wrap(err, "delete file")
+	}
+
 	return nil
 }
 
@@ -73,6 +120,22 @@ func (y YDBStorage) CreateTables(ctx context.Context) error {
 		return errors.Wrap(err, "create nodes table")
 	}
 	return nil
+}
+
+type FileNotFoundErr struct {
+	File string
+}
+
+func (e *FileNotFoundErr) Error() string {
+	return "file not found: " + e.File
+}
+
+type ChunksNotFound struct {
+	File string
+}
+
+func (e *ChunksNotFound) Error() string {
+	return "chunks not found: " + e.File
 }
 
 func (y YDBStorage) File(ctx context.Context, name string) (*File, error) {
@@ -125,6 +188,10 @@ func (y YDBStorage) File(ctx context.Context, name string) (*File, error) {
 		},
 	); err != nil {
 		return nil, errors.Wrap(err, "query")
+	}
+
+	if file.Name == "" {
+		return nil, &FileNotFoundErr{File: name}
 	}
 
 	if err := y.db.Query().Do(ctx,
@@ -182,6 +249,9 @@ func (y YDBStorage) File(ctx context.Context, name string) (*File, error) {
 		},
 	); err != nil {
 		return nil, errors.Wrap(err, "do")
+	}
+	if len(file.Chunks) == 0 {
+		return nil, &ChunksNotFound{File: name}
 	}
 
 	return &file, nil
@@ -293,9 +363,8 @@ func (y YDBStorage) AddNode(ctx context.Context, node Node) error {
 	ctx, span := y.tracer.Start(ctx, "meta.AddNode")
 	defer span.End()
 
-	if err := y.db.Table().DoTx( // Do retry operation on errors with best effort
-		ctx, // context manages exiting from Do
-		func(ctx context.Context, tx table.TransactionActor) (err error) { // retry operation
+	if err := y.db.Table().DoTx(ctx,
+		func(ctx context.Context, tx table.TransactionActor) (err error) {
 			res, err := tx.Execute(ctx, `
           DECLARE $base_url AS UTF8;
           UPSERT INTO nodes ( base_url )

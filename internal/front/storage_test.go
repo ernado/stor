@@ -121,6 +121,12 @@ func TestIntegrationYDBStorage(t *testing.T) {
 			f, err := storage.File(ctx, file.Name)
 			require.NoError(t, err)
 			require.Equal(t, file, *f)
+
+			require.NoError(t, storage.RemoveFile(ctx, file.Name))
+			_, err = storage.File(ctx, file.Name)
+			require.Error(t, err)
+			var nf *FileNotFoundErr
+			require.ErrorAs(t, err, &nf)
 		}
 	}
 }
