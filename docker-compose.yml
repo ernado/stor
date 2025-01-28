@@ -24,7 +24,7 @@ services:
 
   # storage nodes
   node:
-    scale: 16
+    scale: 8
     build:
       context: .
       dockerfile: node.Dockerfile

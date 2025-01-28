@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -20,10 +19,24 @@ import (
 	"github.com/ernado/stor/internal/node"
 )
 
+type Chunk struct {
+	Index  int
+	ID     uuid.UUID
+	Offset int64
+	Size   int64
+	Client *node.Client
+}
+
+type File struct {
+	Size   int64
+	Name   string
+	Chunks []Chunk
+}
+
 type Handler struct {
-	rnd     *rand.Rand
 	mux     sync.Mutex
 	clients map[string]*node.Client
+	files   map[string]File
 
 	chunksPerFile          int
 	maxMultipartFormMemory int64
@@ -60,6 +73,7 @@ func (l *limitReaderFrom) Read(p []byte) (n int, err error) {
 func NewHandler(baseCtx context.Context, httpClient node.HTTPClient, tracerProvider trace.TracerProvider) http.Handler {
 	h := &Handler{
 		clients:                make(map[string]*node.Client),
+		files:                  make(map[string]File),
 		maxMultipartFormMemory: 32 * 1024 * 1024,
 		chunksPerFile:          6,
 	}
@@ -86,6 +100,44 @@ func NewHandler(baseCtx context.Context, httpClient node.HTTPClient, tracerProvi
 		zctx.From(ctx).Info("Registered node",
 			zap.String("baseURL", baseURL),
 		)
+	})
+	mux.HandleFunc("/download/{fileName}", func(w http.ResponseWriter, r *http.Request) {
+		ctx, span := tracer.Start(r.Context(), "Download")
+		defer span.End()
+
+		fileName := r.PathValue("fileName")
+		if fileName == "" {
+			http.Error(w, "fileName is required", http.StatusBadRequest)
+			return
+		}
+
+		h.mux.Lock()
+		file, ok := h.files[fileName]
+		h.mux.Unlock()
+
+		if !ok {
+			http.Error(w, "file not found", http.StatusNotFound)
+			return
+		}
+
+		// Set Content-Length header.
+		w.Header().Set("Content-Length", fmt.Sprint(file.Size))
+
+		// Read chunks continuously.
+		for _, chunk := range file.Chunks {
+			if err := chunk.Client.Read(ctx, chunk.ID, w); err != nil {
+				// Failed.
+				span.RecordError(err,
+					trace.WithAttributes(
+						attribute.Int("chunkIndex", chunk.Index),
+						attribute.String("chunkID", chunk.ID.String()),
+					),
+				)
+				return
+			}
+		}
+
+		// Success.
 	})
 	mux.HandleFunc("/upload", func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -127,14 +179,6 @@ func NewHandler(baseCtx context.Context, httpClient node.HTTPClient, tracerProvi
 				attribute.Int64("chunkSize", chunkSize),
 			),
 		)
-
-		type Chunk struct {
-			Index  int
-			ID     uuid.UUID
-			Offset int64
-			Size   int64
-			Client *node.Client
-		}
 		chunks := make([]Chunk, h.chunksPerFile)
 		for i := 0; i < h.chunksPerFile; i++ {
 			client := h.NextClient()
@@ -192,6 +236,13 @@ func NewHandler(baseCtx context.Context, httpClient node.HTTPClient, tracerProvi
 			Path:   filepath.Join("/download", fileHeader.Filename),
 		}
 		w.WriteHeader(http.StatusOK)
+		h.mux.Lock()
+		h.files[fileHeader.Filename] = File{
+			Size:   size,
+			Name:   fileHeader.Filename,
+			Chunks: chunks,
+		}
+		h.mux.Unlock()
 		fmt.Fprintln(w, u.String())
 	})
 	return mux
