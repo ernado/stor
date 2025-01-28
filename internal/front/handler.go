@@ -3,6 +3,7 @@ package front
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -47,8 +48,9 @@ type HandlerStorage interface {
 
 type Handler struct {
 	mux     sync.Mutex
-	clients map[string]*node.Client
+	clients map[string]NodeClient
 
+	clientConstructor      NodeClientConstructor
 	storage                HandlerStorage
 	chunksPerFile          int
 	maxMultipartFormMemory int64
@@ -56,6 +58,33 @@ type Handler struct {
 	httpClient             node.HTTPClient
 	tracer                 trace.Tracer
 	baseCtx                context.Context
+}
+
+type NodeClient interface {
+	Read(ctx context.Context, chunkID uuid.UUID, w io.Writer) error
+	Write(ctx context.Context, chunkID uuid.UUID, r io.Reader) error
+	Delete(ctx context.Context, id uuid.UUID) error
+	BaseURL() string
+}
+
+type NodeClientConstructor interface {
+	NewClient(baseURL string) NodeClient
+}
+
+type DefaultNodeClientConstructor struct {
+	HTTPClient     node.HTTPClient
+	TracerProvider trace.TracerProvider
+}
+
+func NewDefaultNodeClientConstructor(httpClient node.HTTPClient, tracerProvider trace.TracerProvider) *DefaultNodeClientConstructor {
+	return &DefaultNodeClientConstructor{
+		HTTPClient:     httpClient,
+		TracerProvider: tracerProvider,
+	}
+}
+
+func (c *DefaultNodeClientConstructor) NewClient(baseURL string) NodeClient {
+	return node.NewClient(baseURL, c.HTTPClient, c.TracerProvider)
 }
 
 func (h *Handler) FetchNodes(ctx context.Context) error {
@@ -78,7 +107,7 @@ func (h *Handler) FetchNodes(ctx context.Context) error {
 }
 
 // NextClient returns next client to use for uploads.
-func (h *Handler) NextClient() *node.Client {
+func (h *Handler) NextClient() NodeClient {
 	h.mux.Lock()
 	defer h.mux.Unlock()
 
@@ -90,7 +119,7 @@ func (h *Handler) NextClient() *node.Client {
 }
 
 // GetClient creates or returns existing client to baseURL.
-func (h *Handler) GetClient(baseURL string) *node.Client {
+func (h *Handler) GetClient(baseURL string) NodeClient {
 	h.mux.Lock()
 	defer h.mux.Unlock()
 
@@ -103,8 +132,8 @@ func (h *Handler) GetClient(baseURL string) *node.Client {
 	return client
 }
 
-func (h *Handler) newClient(baseURL string) *node.Client {
-	return node.NewClient(baseURL, h.httpClient, h.tracerProvider)
+func (h *Handler) newClient(baseURL string) NodeClient {
+	return h.clientConstructor.NewClient(baseURL)
 }
 
 func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
@@ -293,7 +322,7 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 
 func NewHandler(
 	baseCtx context.Context,
-	httpClient node.HTTPClient,
+	clientConstructor NodeClientConstructor,
 	storage HandlerStorage,
 	tracerProvider trace.TracerProvider,
 ) http.Handler {
@@ -301,11 +330,10 @@ func NewHandler(
 		storage:                storage,
 		maxMultipartFormMemory: 32 * 1024 * 1024,
 		chunksPerFile:          6,
-		httpClient:             httpClient,
-		tracerProvider:         tracerProvider,
 		tracer:                 tracerProvider.Tracer("stor.front"),
 		baseCtx:                baseCtx,
-		clients:                make(map[string]*node.Client),
+		clients:                make(map[string]NodeClient),
+		clientConstructor:      clientConstructor,
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
