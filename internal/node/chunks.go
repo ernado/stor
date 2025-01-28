@@ -17,9 +17,11 @@ import (
 type Chunks struct {
 	dir string
 
-	trace      trace.Tracer
-	bytesRead  metric.Int64Counter
-	bytesWrote metric.Int64Counter
+	trace       trace.Tracer
+	bytesRead   metric.Int64Counter
+	bytesWrote  metric.Int64Counter
+	chunksRead  metric.Int64Counter
+	chunksWrote metric.Int64Counter
 }
 
 func NewChunks(dir string, tracerProvider trace.TracerProvider, meterProvider metric.MeterProvider) (*Chunks, error) {
@@ -34,13 +36,23 @@ func NewChunks(dir string, tracerProvider trace.TracerProvider, meterProvider me
 	if err != nil {
 		return nil, errors.Wrap(err, "bytes wrote")
 	}
+	chunksRead, err := meter.Int64Counter("node.chunks.read")
+	if err != nil {
+		return nil, errors.Wrap(err, "chunks read")
+	}
+	chunksWrote, err := meter.Int64Counter("node.chunks.wrote")
+	if err != nil {
+		return nil, errors.Wrap(err, "chunks wrote")
+	}
 
 	return &Chunks{
 		dir: dir,
 
-		trace:      tracerProvider.Tracer(name),
-		bytesRead:  bytesRead,
-		bytesWrote: bytesWrote,
+		trace:       tracerProvider.Tracer(name),
+		bytesRead:   bytesRead,
+		bytesWrote:  bytesWrote,
+		chunksRead:  chunksRead,
+		chunksWrote: chunksWrote,
 	}, nil
 }
 
@@ -55,6 +67,8 @@ func (c *Chunks) Write(ctx context.Context, id uuid.UUID, r io.Reader) (rerr err
 	defer func() {
 		if rerr != nil {
 			span.RecordError(rerr)
+		} else {
+			c.chunksWrote.Add(ctx, 1)
 		}
 		span.End()
 	}()
@@ -99,6 +113,8 @@ func (c *Chunks) Read(ctx context.Context, id uuid.UUID, w io.Writer) (rerr erro
 	defer func() {
 		if rerr != nil {
 			span.RecordError(rerr)
+		} else {
+			c.chunksRead.Add(ctx, 1)
 		}
 		span.End()
 	}()
