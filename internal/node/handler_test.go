@@ -56,7 +56,7 @@ func TestNewHandler(t *testing.T) {
 	buf := new(bytes.Buffer)
 	require.NoError(t, client.Read(ctx, id, buf), "read")
 	require.Equal(t, data, buf.Bytes(), "read data should equal to written data")
-	require.Equal(t, data, storage.chunks[id], "read data should equal to storage data")
+	require.Equal(t, data, storage.chunks[id], "data should equal to storage data")
 
 	// Another data.
 	secondData, secondID := rd.New(t, 512), uuid.New()
