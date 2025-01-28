@@ -21,6 +21,10 @@ type Client struct {
 	http    HTTPClient
 }
 
+func (c *Client) BaseURL() string {
+	return c.baseURL
+}
+
 func NewClient(baseURL string, http HTTPClient, tracerProvider trace.TracerProvider) *Client {
 	return &Client{
 		http:    http,

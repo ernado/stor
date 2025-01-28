@@ -3,12 +3,12 @@ package front
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"path/filepath"
 	"sync"
 
+	"github.com/go-faster/errors"
 	"github.com/go-faster/sdk/zctx"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
@@ -20,11 +20,11 @@ import (
 )
 
 type Chunk struct {
-	Index  int
-	ID     uuid.UUID
-	Offset int64
-	Size   int64
-	Client *node.Client
+	Index       int
+	ID          uuid.UUID
+	Offset      int64
+	Size        int64
+	NodeBaseURL string // [Node.BaseURL]
 }
 
 type File struct {
@@ -33,217 +33,281 @@ type File struct {
 	Chunks []Chunk
 }
 
+type Node struct {
+	BaseURL string
+}
+
+type HandlerStorage interface {
+	File(ctx context.Context, name string) (*File, error)
+	AddFile(ctx context.Context, file File) error
+	RemoveFile(ctx context.Context, name string) error
+	Nodes(ctx context.Context) ([]Node, error)
+	AddNode(ctx context.Context, node Node) error
+}
+
 type Handler struct {
 	mux     sync.Mutex
 	clients map[string]*node.Client
-	files   map[string]File
 
+	storage                HandlerStorage
 	chunksPerFile          int
 	maxMultipartFormMemory int64
+	tracerProvider         trace.TracerProvider
+	httpClient             node.HTTPClient
+	tracer                 trace.Tracer
+	baseCtx                context.Context
 }
 
-func (h *Handler) NextClient() *node.Client {
+func (h *Handler) FetchNodes(ctx context.Context) error {
+	ctx, span := h.tracer.Start(ctx, "FetchNodes")
+	defer span.End()
+
+	clients, err := h.storage.Nodes(ctx)
+	if err != nil {
+		return errors.Wrap(err, "fetch clients")
+	}
+
 	h.mux.Lock()
 	defer h.mux.Unlock()
-	for _, client := range h.clients {
-		return client // random client
+
+	for _, client := range clients {
+		h.clients[client.BaseURL] = h.newClient(client.BaseURL)
 	}
+
 	return nil
 }
 
-type limitReaderFrom struct {
-	r      io.ReaderAt
-	n      int64
-	offset int64
+// NextClient returns next client to use for uploads.
+func (h *Handler) NextClient() *node.Client {
+	h.mux.Lock()
+	defer h.mux.Unlock()
+
+	for _, client := range h.clients {
+		return client
+	}
+
+	return nil
 }
 
-func (l *limitReaderFrom) Read(p []byte) (n int, err error) {
-	if l.n <= 0 {
-		return 0, io.EOF
-	}
-	if int64(len(p)) > l.n {
-		p = p[:l.n]
-	}
-	n, err = l.r.ReadAt(p, l.offset)
-	l.offset += int64(n)
-	l.n -= int64(n)
-	return
-}
+// GetClient creates or returns existing client to baseURL.
+func (h *Handler) GetClient(baseURL string) *node.Client {
+	h.mux.Lock()
+	defer h.mux.Unlock()
 
-func NewHandler(baseCtx context.Context, httpClient node.HTTPClient, tracerProvider trace.TracerProvider) http.Handler {
-	h := &Handler{
-		clients:                make(map[string]*node.Client),
-		files:                  make(map[string]File),
-		maxMultipartFormMemory: 32 * 1024 * 1024,
-		chunksPerFile:          6,
-	}
-	tracer := tracerProvider.Tracer("stor.front")
-	mux := http.NewServeMux()
-	mux.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
-		ctx, span := tracer.Start(r.Context(), "Register")
-		defer span.End()
-
-		// Register new node.
-		// Use node.Client to communicate with the node.
-		// Store node.Client in h.clients.
-		baseURL := r.URL.Query().Get("baseURL")
-		if baseURL == "" {
-			http.Error(w, "baseURL is required", http.StatusBadRequest)
-			return
-		}
-
-		client := node.NewClient(baseURL, httpClient, tracerProvider)
-		h.mux.Lock()
+	client, ok := h.clients[baseURL]
+	if !ok {
+		client = h.newClient(baseURL)
 		h.clients[baseURL] = client
-		h.mux.Unlock()
+	}
 
-		zctx.From(ctx).Info("Registered node",
-			zap.String("baseURL", baseURL),
-		)
-	})
-	mux.HandleFunc("/download/{fileName}", func(w http.ResponseWriter, r *http.Request) {
-		ctx, span := tracer.Start(r.Context(), "Download")
-		defer span.End()
+	return client
+}
 
-		fileName := r.PathValue("fileName")
-		if fileName == "" {
-			http.Error(w, "fileName is required", http.StatusBadRequest)
+func (h *Handler) newClient(baseURL string) *node.Client {
+	return node.NewClient(baseURL, h.httpClient, h.tracerProvider)
+}
+
+func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
+	ctx, span := h.tracer.Start(r.Context(), "Register")
+	defer span.End()
+
+	// Register new node.
+	// Use node.Node to communicate with the node.
+	// Store node.Node in h.clients.
+	baseURL := r.URL.Query().Get("baseURL")
+	if baseURL == "" {
+		http.Error(w, "baseURL is required", http.StatusBadRequest)
+		return
+	}
+	if err := h.storage.AddNode(ctx, Node{BaseURL: baseURL}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	zctx.From(ctx).Info("Registered node",
+		zap.String("baseURL", baseURL),
+	)
+}
+
+func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
+	ctx, span := h.tracer.Start(r.Context(), "Download")
+	defer span.End()
+
+	fileName := r.PathValue("fileName")
+	if fileName == "" {
+		http.Error(w, "fileName is required", http.StatusBadRequest)
+		return
+	}
+	file, err := h.storage.File(ctx, fileName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Set Content-Length header.
+	w.Header().Set("Content-Length", fmt.Sprint(file.Size))
+
+	// Read chunks continuously.
+	for _, chunk := range file.Chunks {
+		client := h.GetClient(chunk.NodeBaseURL)
+
+		if err := client.Read(ctx, chunk.ID, w); err != nil {
+			// Failed.
+			span.RecordError(err,
+				trace.WithAttributes(
+					attribute.Int("chunkIndex", chunk.Index),
+					attribute.String("chunkID", chunk.ID.String()),
+				),
+			)
 			return
 		}
+	}
 
-		h.mux.Lock()
-		file, ok := h.files[fileName]
-		h.mux.Unlock()
+	// Success.
+}
 
-		if !ok {
-			http.Error(w, "file not found", http.StatusNotFound)
+func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	ctx, span := h.tracer.Start(r.Context(), "Upload")
+	defer span.End()
+
+	if err := r.ParseMultipartForm(h.maxMultipartFormMemory); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var formKey string
+	for k := range r.MultipartForm.File {
+		formKey = k
+		break
+	}
+	if formKey == "" {
+		http.Error(w, "file is required", http.StatusBadRequest)
+		return
+	}
+	zctx.From(ctx).Info("Selected file from form", zap.String("formKey", formKey))
+	formFile, fileHeader, err := r.FormFile(formKey)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Split file into N chunks.
+	size := fileHeader.Size
+	chunkSize := size / int64(h.chunksPerFile)
+	span.AddEvent("Splitting file into chunks",
+		trace.WithAttributes(
+			attribute.String("formKey", formKey),
+			attribute.String("fileName", fileHeader.Filename),
+			attribute.Int("chunksPerFile", h.chunksPerFile),
+			attribute.Int64("chunkSize", chunkSize),
+		),
+	)
+	// Prepare chunks and allocate clients to storage nodes.
+	chunks := make([]Chunk, h.chunksPerFile)
+	for i := 0; i < h.chunksPerFile; i++ {
+		client := h.NextClient()
+		if client == nil {
+			http.Error(w, "no client", http.StatusInternalServerError)
 			return
 		}
-
-		// Set Content-Length header.
-		w.Header().Set("Content-Length", fmt.Sprint(file.Size))
-
-		// Read chunks continuously.
-		for _, chunk := range file.Chunks {
-			if err := chunk.Client.Read(ctx, chunk.ID, w); err != nil {
-				// Failed.
-				span.RecordError(err,
-					trace.WithAttributes(
-						attribute.Int("chunkIndex", chunk.Index),
-						attribute.String("chunkID", chunk.ID.String()),
-					),
-				)
-				return
-			}
+		chunks[i] = Chunk{
+			Index:       i,
+			ID:          uuid.New(),
+			Offset:      int64(i) * chunkSize,
+			Size:        chunkSize,
+			NodeBaseURL: client.BaseURL(),
 		}
-
-		// Success.
-	})
-	mux.HandleFunc("/upload", func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		ctx, span := tracer.Start(r.Context(), "Upload")
-		defer span.End()
-
-		if err := r.ParseMultipartForm(h.maxMultipartFormMemory); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+		if i == h.chunksPerFile-1 {
+			// Last chunk.
+			chunks[i].Size = size - chunks[i].Offset
 		}
-		var formKey string
-		for k := range r.MultipartForm.File {
-			formKey = k
-			break
-		}
-		if formKey == "" {
-			http.Error(w, "file is required", http.StatusBadRequest)
-			return
-		}
-		zctx.From(ctx).Info("Selected file from form", zap.String("formKey", formKey))
-		formFile, fileHeader, err := r.FormFile(formKey)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+	}
 
-		// Save MIME type, file name, and file size.
-		// Split file into N chunks.
-		// Delete uploaded chunks if user cancels upload.
+	// Upload and save metadata concurrently.
+	g, ctx := errgroup.WithContext(ctx)
+	for _, chunk := range chunks {
+		client := h.GetClient(chunk.NodeBaseURL)
 
-		size := fileHeader.Size
-		// Split file into N chunks.
-		chunkSize := size / int64(h.chunksPerFile)
-		span.AddEvent("Splitting file into chunks",
-			trace.WithAttributes(
-				attribute.String("formKey", formKey),
-				attribute.String("fileName", fileHeader.Filename),
-				attribute.Int("chunksPerFile", h.chunksPerFile),
-				attribute.Int64("chunkSize", chunkSize),
-			),
-		)
-		chunks := make([]Chunk, h.chunksPerFile)
-		for i := 0; i < h.chunksPerFile; i++ {
-			client := h.NextClient()
-			if client == nil {
-				http.Error(w, "no client", http.StatusInternalServerError)
-				return
-			}
-			chunks[i] = Chunk{
-				Index:  i,
-				ID:     uuid.New(),
-				Offset: int64(i) * chunkSize,
-				Size:   chunkSize,
-				Client: client,
-			}
-			if i == h.chunksPerFile-1 {
-				// Last chunk.
-				chunks[i].Size = size - chunks[i].Offset
-			}
-		}
-
-		g, ctx := errgroup.WithContext(ctx)
-		for _, chunk := range chunks {
-			g.Go(func() error {
-				return chunk.Client.Write(ctx, chunk.ID, &limitReaderFrom{
-					r:      formFile,
-					n:      chunk.Size,
-					offset: chunk.Offset,
-				})
+		g.Go(func() error {
+			return client.Write(ctx, chunk.ID, &LimitReaderFrom{
+				R:      formFile,
+				N:      chunk.Size,
+				Offset: chunk.Offset,
 			})
-		}
-		if err := g.Wait(); err != nil {
-			// Remove uploaded chunks.
-			for _, chunk := range chunks {
-				// Start new span with link to the previous span.
-				link := trace.LinkFromContext(ctx)
-				// Use baseCtx as ctx can be already canceled.
-				ctx, span = tracer.Start(baseCtx, "DeleteChunk")
-				span.AddLink(link)
-				if err := chunk.Client.Delete(ctx, chunk.ID); err != nil {
-					zctx.From(ctx).Warn("Failed to delete chunk",
-						zap.String("chunkID", chunk.ID.String()),
-						zap.Error(err),
-					)
-				}
-			}
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// Return uploaded file link.
-		// Assume that we are on 127.0.0.1.
-		u := &url.URL{
-			Scheme: "http",
-			Host:   r.Host,
-			Path:   filepath.Join("/download", fileHeader.Filename),
-		}
-		w.WriteHeader(http.StatusOK)
-		h.mux.Lock()
-		h.files[fileHeader.Filename] = File{
+		})
+	}
+	g.Go(func() error {
+		// Add file to metadata storage.
+		file := File{
 			Size:   size,
 			Name:   fileHeader.Filename,
 			Chunks: chunks,
 		}
-		h.mux.Unlock()
-		fmt.Fprintln(w, u.String())
+		return h.storage.AddFile(ctx, file)
 	})
+	if err := g.Wait(); err != nil {
+		// Remove uploaded chunks.
+		link := trace.LinkFromContext(ctx)
+		// Use baseCtx as ctx can be already canceled.
+		ctx, span = h.tracer.Start(h.baseCtx, "Cleanup")
+		span.AddLink(link)
+		defer span.End()
+
+		for _, chunk := range chunks {
+			// Start new span with link to the previous span.
+			client := h.GetClient(chunk.NodeBaseURL)
+
+			if err := client.Delete(ctx, chunk.ID); err != nil {
+				zctx.From(ctx).Warn("Failed to delete chunk",
+					zap.String("chunkID", chunk.ID.String()),
+					zap.Error(err),
+				)
+			}
+		}
+		if err := h.storage.RemoveFile(ctx, fileHeader.Filename); err != nil {
+			zctx.From(ctx).Warn("Failed to remove file",
+				zap.String("fileName", fileHeader.Filename),
+				zap.Error(err),
+			)
+		}
+
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return uploaded file link.
+	// Assume that we are on 127.0.0.1.
+	u := &url.URL{
+		Scheme: "http",
+		Host:   r.Host,
+		Path:   filepath.Join("/download", fileHeader.Filename),
+	}
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintln(w, u.String())
+}
+
+func NewHandler(
+	baseCtx context.Context,
+	httpClient node.HTTPClient,
+	storage HandlerStorage,
+	tracerProvider trace.TracerProvider,
+) http.Handler {
+	h := &Handler{
+		storage:                storage,
+		maxMultipartFormMemory: 32 * 1024 * 1024,
+		chunksPerFile:          6,
+		httpClient:             httpClient,
+		tracerProvider:         tracerProvider,
+		tracer:                 tracerProvider.Tracer("stor.front"),
+		baseCtx:                baseCtx,
+		clients:                make(map[string]*node.Client),
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/register", h.register)
+	mux.HandleFunc("/download/{fileName}", h.download)
+	mux.HandleFunc("/upload", h.upload)
 	return mux
 }

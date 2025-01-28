@@ -10,6 +10,9 @@ services:
     build:
       context: .
       dockerfile: front.Dockerfile
+    depends_on:
+      ydb:
+        condition: service_healthy
     ports:
       - "8080:8080"
     environment:
@@ -29,7 +32,8 @@ services:
       context: .
       dockerfile: node.Dockerfile
     depends_on:
-      - front
+      front:
+        condition: service_healthy
     environment:
       - OTEL_LOG_LEVEL=debug
       - OTEL_EXPORTER_OTLP_PROTOCOL=grpc

@@ -1,0 +1,325 @@
+package front
+
+import (
+	"context"
+	"path"
+
+	"github.com/go-faster/errors"
+	"github.com/google/uuid"
+	"github.com/ydb-platform/ydb-go-sdk/v3"
+	"github.com/ydb-platform/ydb-go-sdk/v3/query"
+	"github.com/ydb-platform/ydb-go-sdk/v3/table"
+	"github.com/ydb-platform/ydb-go-sdk/v3/table/options"
+	"github.com/ydb-platform/ydb-go-sdk/v3/table/types"
+	"go.opentelemetry.io/otel/trace"
+)
+
+var _ HandlerStorage = (*YDBStorage)(nil)
+
+func NewYDBStorage(db *ydb.Driver, tracer trace.Tracer) *YDBStorage {
+	return &YDBStorage{
+		db:     db,
+		tracer: tracer,
+	}
+}
+
+type YDBStorage struct {
+	db     *ydb.Driver
+	tracer trace.Tracer
+}
+
+func (y YDBStorage) RemoveFile(ctx context.Context, name string) error {
+	return nil
+}
+
+func (y YDBStorage) CreateTables(ctx context.Context) error {
+	ctx, span := y.tracer.Start(ctx, "CreateTables")
+	defer span.End()
+
+	if err := y.db.Table().Do(ctx,
+		func(ctx context.Context, s table.Session) (err error) {
+			return s.CreateTable(ctx, path.Join(y.db.Name(), "files"),
+				options.WithColumn("name", types.TypeUTF8),
+				options.WithColumn("size", types.TypeUint64),
+				options.WithPrimaryKeyColumn("name"),
+			)
+		},
+	); err != nil {
+		return errors.Wrap(err, "create files table")
+	}
+	if err := y.db.Table().Do(ctx,
+		func(ctx context.Context, s table.Session) (err error) {
+			return s.CreateTable(ctx, path.Join(y.db.Name(), "chunks"),
+				options.WithColumn("file", types.TypeUTF8),
+				options.WithColumn("index", types.TypeUint64),
+				options.WithColumn("id", types.TypeUUID),
+				options.WithColumn("offset", types.TypeUint64),
+				options.WithColumn("size", types.TypeUint64),
+				options.WithColumn("node", types.TypeUTF8),
+				options.WithPrimaryKeyColumn("file", "index"),
+			)
+		},
+	); err != nil {
+		return errors.Wrap(err, "create chunks table")
+	}
+	if err := y.db.Table().Do(ctx,
+		func(ctx context.Context, s table.Session) (err error) {
+			return s.CreateTable(ctx, path.Join(y.db.Name(), "nodes"),
+				options.WithColumn("base_url", types.TypeUTF8),
+				options.WithPrimaryKeyColumn("base_url"),
+			)
+		},
+	); err != nil {
+		return errors.Wrap(err, "create nodes table")
+	}
+	return nil
+}
+
+func (y YDBStorage) File(ctx context.Context, name string) (*File, error) {
+	ctx, span := y.tracer.Start(ctx, "File")
+	defer span.End()
+
+	// Fetch file from YDB.
+	var file File
+	if err := y.db.Query().Do(ctx,
+		func(ctx context.Context, s query.Session) error {
+			res, err := s.Query(ctx,
+				`DECLARE $fileName AS UTF8;
+			SELECT
+			  name,
+			  size,
+			FROM
+			  files
+			WHERE
+			  name = $fileName;`,
+				query.WithParameters(
+					table.NewQueryParameters(
+						table.ValueParam("$fileName", types.UTF8Value(name)),
+					),
+				),
+			)
+
+			for rs, err := range res.ResultSets(ctx) {
+				if err != nil {
+					return errors.Wrap(err, "result set")
+				}
+				for row, err := range rs.Rows(ctx) {
+					if err != nil {
+						return errors.Wrap(err, "row")
+					}
+					var v struct {
+						Name string `sql:"name"`
+						Size uint64 `sql:"size"`
+					}
+					if err := row.ScanStruct(&v); err != nil {
+						return errors.Wrap(err, "scan")
+					}
+					file.Name = v.Name
+					file.Size = int64(v.Size)
+				}
+			}
+			if err != nil {
+				return errors.Wrap(err, "query")
+			}
+			return nil
+		},
+	); err != nil {
+		return nil, errors.Wrap(err, "query")
+	}
+
+	if err := y.db.Query().Do(ctx,
+		func(ctx context.Context, s query.Session) error {
+			res, err := s.Query(ctx,
+				`DECLARE $fileName AS UTF8;
+			SELECT
+			  index,
+              id,
+			  offset,
+			  size,
+			  node
+			FROM
+			  chunks
+			WHERE
+			  file = $fileName;`,
+				query.WithParameters(
+					table.NewQueryParameters(
+						table.ValueParam("$fileName", types.UTF8Value(name)),
+					),
+				),
+			)
+
+			for rs, err := range res.ResultSets(ctx) {
+				if err != nil {
+					return errors.Wrap(err, "result set")
+				}
+				for row, err := range rs.Rows(ctx) {
+					if err != nil {
+						return errors.Wrap(err, "row")
+					}
+					var v struct {
+						Index  uint64    `sql:"index"`
+						ID     uuid.UUID `sql:"id"`
+						Offset uint64    `sql:"offset"`
+						Size   uint64    `sql:"size"`
+						Node   string    `sql:"node"`
+					}
+					if err := row.ScanStruct(&v); err != nil {
+						return errors.Wrap(err, "scan")
+					}
+					file.Chunks = append(file.Chunks, Chunk{
+						Index:       int(v.Index),
+						ID:          v.ID,
+						Offset:      int64(v.Offset),
+						Size:        int64(v.Size),
+						NodeBaseURL: v.Node,
+					})
+				}
+			}
+			if err != nil {
+				return errors.Wrap(err, "query")
+			}
+			return nil
+		},
+	); err != nil {
+		return nil, errors.Wrap(err, "do")
+	}
+
+	return &file, nil
+}
+
+func (y YDBStorage) AddFile(ctx context.Context, file File) error {
+	ctx, span := y.tracer.Start(ctx, "AddFile")
+	defer span.End()
+
+	if err := y.db.Table().DoTx( // Do retry operation on errors with best effort
+		ctx, // context manages exiting from Do
+		func(ctx context.Context, tx table.TransactionActor) (err error) { // retry operation
+			res, err := tx.Execute(ctx, `
+          DECLARE $name AS UTF8;
+          DECLARE $size AS UInt64;
+          UPSERT INTO files ( name, size )
+          VALUES ( $name, $size );
+        `,
+				table.NewQueryParameters(
+					table.ValueParam("$name", types.UTF8Value(file.Name)),
+					table.ValueParam("$size", types.Uint64Value(uint64(file.Size))),
+				),
+			)
+			if err != nil {
+				return errors.Wrap(err, "execute")
+			}
+			if err = res.Err(); err != nil {
+				return errors.Wrap(err, "result")
+			}
+			if err := res.Close(); err != nil {
+				return errors.Wrap(err, "close")
+			}
+
+			for _, chunk := range file.Chunks {
+				res, err = tx.Execute(ctx, `
+		  DECLARE $file AS UTF8;
+		  DECLARE $index AS UInt64;
+		  DECLARE $id AS UUID;
+		  DECLARE $offset AS UInt64;
+		  DECLARE $size AS UInt64;
+		  DECLARE $node AS UTF8;
+		  UPSERT INTO chunks ( file, index, id, offset, size, node )
+		  VALUES ( $file, $index, $id, $offset, $size, $node );
+		`,
+					table.NewQueryParameters(
+						table.ValueParam("$file", types.UTF8Value(file.Name)),
+						table.ValueParam("$index", types.Uint64Value(uint64(chunk.Index))),
+						table.ValueParam("$id", types.UuidValue(chunk.ID)),
+						table.ValueParam("$offset", types.Uint64Value(uint64(chunk.Offset))),
+						table.ValueParam("$size", types.Uint64Value(uint64(chunk.Size))),
+						table.ValueParam("$node", types.UTF8Value(chunk.NodeBaseURL)),
+					),
+				)
+				if err != nil {
+					return errors.Wrap(err, "execute")
+				}
+				if err = res.Err(); err != nil {
+					return errors.Wrap(err, "result")
+				}
+				if err := res.Close(); err != nil {
+					return errors.Wrap(err, "close")
+				}
+			}
+
+			return nil
+		}, table.WithIdempotent(),
+	); err != nil {
+		return errors.Wrap(err, "upsert file")
+	}
+	return nil
+}
+
+func (y YDBStorage) Nodes(ctx context.Context) ([]Node, error) {
+	ctx, span := y.tracer.Start(ctx, "Nodes")
+	defer span.End()
+
+	var nodes []Node
+	if err := y.db.Query().Do(ctx,
+		func(ctx context.Context, s query.Session) error {
+			res, err := s.Query(ctx, `SELECT base_url FROM nodes;`)
+			for rs, err := range res.ResultSets(ctx) {
+				if err != nil {
+					return errors.Wrap(err, "result set")
+				}
+				for row, err := range rs.Rows(ctx) {
+					if err != nil {
+						return errors.Wrap(err, "row")
+					}
+					var node Node
+					if err := row.Scan(&node.BaseURL); err != nil {
+						return errors.Wrap(err, "scan")
+					}
+					nodes = append(nodes, node)
+				}
+			}
+			if err != nil {
+				return errors.Wrap(err, "query")
+			}
+			return nil
+		},
+	); err != nil {
+		return nil, errors.Wrap(err, "do")
+	}
+
+	return nodes, nil
+}
+
+func (y YDBStorage) AddNode(ctx context.Context, node Node) error {
+	ctx, span := y.tracer.Start(ctx, "AddNode")
+	defer span.End()
+
+	if err := y.db.Table().DoTx( // Do retry operation on errors with best effort
+		ctx, // context manages exiting from Do
+		func(ctx context.Context, tx table.TransactionActor) (err error) { // retry operation
+			res, err := tx.Execute(ctx, `
+          DECLARE $base_url AS UTF8;
+          UPSERT INTO nodes ( base_url )
+          VALUES ( $base_url );
+        `,
+				table.NewQueryParameters(
+					table.ValueParam("$base_url", types.UTF8Value(node.BaseURL)),
+				),
+			)
+			if err != nil {
+				return errors.Wrap(err, "execute")
+			}
+			if err = res.Err(); err != nil {
+				return errors.Wrap(err, "result")
+			}
+			if err := res.Close(); err != nil {
+				return errors.Wrap(err, "close")
+			}
+
+			return nil
+		}, table.WithIdempotent(),
+	); err != nil {
+		return errors.Wrap(err, "upsert node")
+	}
+
+	return nil
+}
