@@ -59,7 +59,7 @@ type Handler struct {
 }
 
 func (h *Handler) FetchNodes(ctx context.Context) error {
-	ctx, span := h.tracer.Start(ctx, "FetchNodes")
+	ctx, span := h.tracer.Start(ctx, "handler.FetchNodes")
 	defer span.End()
 
 	clients, err := h.storage.Nodes(ctx)
@@ -108,12 +108,8 @@ func (h *Handler) newClient(baseURL string) *node.Client {
 }
 
 func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
-	ctx, span := h.tracer.Start(r.Context(), "Register")
+	ctx, span := h.tracer.Start(r.Context(), "handler.Register")
 	defer span.End()
-
-	// Register new node.
-	// Use node.Node to communicate with the node.
-	// Store node.Node in h.clients.
 	baseURL := r.URL.Query().Get("baseURL")
 	if baseURL == "" {
 		http.Error(w, "baseURL is required", http.StatusBadRequest)
@@ -126,10 +122,14 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 	zctx.From(ctx).Info("Registered node",
 		zap.String("baseURL", baseURL),
 	)
+	if err := h.FetchNodes(ctx); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
-	ctx, span := h.tracer.Start(r.Context(), "Download")
+	ctx, span := h.tracer.Start(r.Context(), "handler.Download")
 	defer span.End()
 
 	fileName := r.PathValue("fileName")
@@ -143,7 +143,6 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set Content-Length header.
 	w.Header().Set("Content-Length", fmt.Sprint(file.Size))
 
 	// Read chunks continuously.
@@ -167,8 +166,14 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	ctx, span := h.tracer.Start(r.Context(), "Upload")
+	ctx, span := h.tracer.Start(r.Context(), "handler.Upload")
 	defer span.End()
+
+	if err := h.FetchNodes(ctx); err != nil {
+		// Can be done in background.
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	if err := r.ParseMultipartForm(h.maxMultipartFormMemory); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)

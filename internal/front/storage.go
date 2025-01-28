@@ -33,7 +33,7 @@ func (y YDBStorage) RemoveFile(ctx context.Context, name string) error {
 }
 
 func (y YDBStorage) CreateTables(ctx context.Context) error {
-	ctx, span := y.tracer.Start(ctx, "CreateTables")
+	ctx, span := y.tracer.Start(ctx, "meta.CreateTables")
 	defer span.End()
 
 	if err := y.db.Table().Do(ctx,
@@ -76,7 +76,7 @@ func (y YDBStorage) CreateTables(ctx context.Context) error {
 }
 
 func (y YDBStorage) File(ctx context.Context, name string) (*File, error) {
-	ctx, span := y.tracer.Start(ctx, "File")
+	ctx, span := y.tracer.Start(ctx, "meta.File")
 	defer span.End()
 
 	// Fetch file from YDB.
@@ -188,7 +188,7 @@ func (y YDBStorage) File(ctx context.Context, name string) (*File, error) {
 }
 
 func (y YDBStorage) AddFile(ctx context.Context, file File) error {
-	ctx, span := y.tracer.Start(ctx, "AddFile")
+	ctx, span := y.tracer.Start(ctx, "meta.AddFile")
 	defer span.End()
 
 	if err := y.db.Table().DoTx( // Do retry operation on errors with best effort
@@ -255,7 +255,7 @@ func (y YDBStorage) AddFile(ctx context.Context, file File) error {
 }
 
 func (y YDBStorage) Nodes(ctx context.Context) ([]Node, error) {
-	ctx, span := y.tracer.Start(ctx, "Nodes")
+	ctx, span := y.tracer.Start(ctx, "meta.Nodes")
 	defer span.End()
 
 	var nodes []Node
@@ -290,7 +290,7 @@ func (y YDBStorage) Nodes(ctx context.Context) ([]Node, error) {
 }
 
 func (y YDBStorage) AddNode(ctx context.Context, node Node) error {
-	ctx, span := y.tracer.Start(ctx, "AddNode")
+	ctx, span := y.tracer.Start(ctx, "meta.AddNode")
 	defer span.End()
 
 	if err := y.db.Table().DoTx( // Do retry operation on errors with best effort
