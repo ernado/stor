@@ -52,4 +52,9 @@ func TestChunks(t *testing.T) {
 	buf.Reset()
 	require.NoError(t, chunks.Read(ctx, secondID, buf), "read")
 	require.Equal(t, secondData, buf.Bytes(), "read data should equal to written data")
+
+	// Delete chunk.
+	require.NoError(t, chunks.Delete(ctx, id), "delete")
+	require.Error(t, chunks.Read(ctx, id, new(bytes.Buffer)), "read deleted chunk should error")
+	require.NoError(t, chunks.Delete(ctx, id), "delete idempotent")
 }

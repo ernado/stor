@@ -17,11 +17,12 @@ import (
 type Chunks struct {
 	dir string
 
-	trace       trace.Tracer
-	bytesRead   metric.Int64Counter
-	bytesWrote  metric.Int64Counter
-	chunksRead  metric.Int64Counter
-	chunksWrote metric.Int64Counter
+	trace         trace.Tracer
+	bytesRead     metric.Int64Counter
+	bytesWrote    metric.Int64Counter
+	chunksRead    metric.Int64Counter
+	chunksWrote   metric.Int64Counter
+	chunksDeleted metric.Int64Counter
 }
 
 func NewChunks(dir string, tracerProvider trace.TracerProvider, meterProvider metric.MeterProvider) (*Chunks, error) {
@@ -44,15 +45,20 @@ func NewChunks(dir string, tracerProvider trace.TracerProvider, meterProvider me
 	if err != nil {
 		return nil, errors.Wrap(err, "chunks wrote")
 	}
+	chunksDeleted, err := meter.Int64Counter("node.chunks.deleted")
+	if err != nil {
+		return nil, errors.Wrap(err, "chunks deleted")
+	}
 
 	return &Chunks{
 		dir: dir,
 
-		trace:       tracerProvider.Tracer(name),
-		bytesRead:   bytesRead,
-		bytesWrote:  bytesWrote,
-		chunksRead:  chunksRead,
-		chunksWrote: chunksWrote,
+		trace:         tracerProvider.Tracer(name),
+		bytesRead:     bytesRead,
+		bytesWrote:    bytesWrote,
+		chunksRead:    chunksRead,
+		chunksWrote:   chunksWrote,
+		chunksDeleted: chunksDeleted,
 	}, nil
 }
 
@@ -132,5 +138,26 @@ func (c *Chunks) Read(ctx context.Context, id uuid.UUID, w io.Writer) (rerr erro
 		return errors.Wrap(err, "copy")
 	}
 
+	return nil
+}
+
+func (c *Chunks) Delete(ctx context.Context, id uuid.UUID) (rerr error) {
+	ctx, span := c.trace.Start(ctx, "Chunks.Delete")
+	defer func() {
+		if rerr != nil {
+			span.RecordError(rerr)
+		}
+		span.End()
+	}()
+	err := os.Remove(filepath.Join(getTargetDir(c.dir, id), id.String()))
+	if err == nil {
+		c.chunksDeleted.Add(ctx, 1)
+	}
+	if os.IsNotExist(err) {
+		err = nil // idempotency
+	}
+	if err != nil {
+		return errors.Wrap(err, "remove")
+	}
 	return nil
 }

@@ -35,6 +35,11 @@ func (c *inMemoryChunks) Read(_ context.Context, id uuid.UUID, w io.Writer) erro
 	return err
 }
 
+func (c *inMemoryChunks) Delete(_ context.Context, id uuid.UUID) error {
+	delete(c.chunks, id)
+	return nil
+}
+
 func newInMemoryChunks() *inMemoryChunks {
 	return &inMemoryChunks{
 		chunks: make(map[uuid.UUID][]byte),
@@ -67,4 +72,9 @@ func TestNewHandler(t *testing.T) {
 	buf.Reset()
 	require.NoError(t, client.Read(ctx, secondID, buf), "read")
 	require.Equal(t, secondData, buf.Bytes(), "read data should equal to written data")
+
+	// Delete chunk.
+	require.NoError(t, client.Delete(ctx, id), "delete")
+	_, ok := storage.chunks[id]
+	require.False(t, ok, "deleted chunk should not exist")
 }

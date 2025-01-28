@@ -11,6 +11,7 @@ import (
 type HandlerStorage interface {
 	Read(ctx context.Context, id uuid.UUID, w io.Writer) error
 	Write(ctx context.Context, id uuid.UUID, r io.Reader) error
+	Delete(ctx context.Context, id uuid.UUID) error
 }
 
 type Handler struct {
@@ -34,6 +35,11 @@ func NewHandler(storage HandlerStorage) http.Handler {
 			}
 		case http.MethodPut:
 			if err := storage.Write(ctx, id, r.Body); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		case http.MethodDelete:
+			if err := storage.Delete(ctx, id); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
