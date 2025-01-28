@@ -63,7 +63,7 @@ func getTargetDir(dir string, id uuid.UUID) string {
 
 // Write chunk to disk.
 func (c *Chunks) Write(ctx context.Context, id uuid.UUID, r io.Reader) (rerr error) {
-	_, span := c.trace.Start(ctx, "Chunks.Write")
+	ctx, span := c.trace.Start(ctx, "Chunks.Write")
 	defer func() {
 		if rerr != nil {
 			span.RecordError(rerr)
@@ -109,7 +109,7 @@ func (c *Chunks) Write(ctx context.Context, id uuid.UUID, r io.Reader) (rerr err
 }
 
 func (c *Chunks) Read(ctx context.Context, id uuid.UUID, w io.Writer) (rerr error) {
-	_, span := c.trace.Start(ctx, "Chunks.Read")
+	ctx, span := c.trace.Start(ctx, "Chunks.Read")
 	defer func() {
 		if rerr != nil {
 			span.RecordError(rerr)
