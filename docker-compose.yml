@@ -11,6 +11,15 @@ services:
     build:
       context: .
       dockerfile: node.Dockerfile
+    environment:
+      - OTEL_LOG_LEVEL=debug
+      - OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+      - OTEL_EXPORTER_OTLP_INSECURE=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4317
+      - OTEL_GO_X_DEPRECATED_RUNTIME_METRICS=false
+      - OTEL_GO_X_RESOURCE=true
+      - OTEL_METRIC_EXPORT_INTERVAL=5000
+      - OTEL_METRIC_EXPORT_TIMEOUT=2500
 
   # Database for metadata
   # https://ydb.tech/docs/ru/quickstart

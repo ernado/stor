@@ -46,5 +46,7 @@ func main() {
 			return errors.Wrap(err, "listen and serve")
 		}
 		return nil
-	})
+	},
+		app.WithServiceName("stor.node"),
+	)
 }
