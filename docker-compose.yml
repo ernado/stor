@@ -7,6 +7,9 @@ volumes:
 services:
   # frontend (REST API) node
   front:
+    profiles:
+      - app
+      - full
     build:
       context: .
       dockerfile: front.Dockerfile
@@ -27,6 +30,9 @@ services:
 
   # storage nodes
   node:
+    profiles:
+      - app
+      - full
     scale: 8
     build:
       context: .
@@ -51,6 +57,9 @@ services:
     image: "ydbplatform/local-ydb:latest"
     platform: linux/amd64
     hostname: localhost
+    profiles:
+      - app
+      - full
     ports:
       - "2135:2135"
       - "2136:2136"
@@ -75,6 +84,9 @@ services:
   #       stor-front-------------|
 
   prometheus:
+    profiles:
+      - full
+      - observability
     image: "ghcr.io/go-faster/prom/prometheus:v3.1.0"
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
@@ -83,6 +95,9 @@ services:
       - ./_hack/prometheus.yml:/etc/prometheus/prometheus.yml
       - prom:/prometheus
   loki:
+    profiles:
+      - full
+      - observability
     image: grafana/loki:2.9.0
     command: -config.file=/etc/loki/local-config.yaml
 
@@ -91,6 +106,9 @@ services:
     image: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.89.0
     volumes:
       - ./_hack/otelcol.yml:/etc/otelcol-contrib/config.yaml
+    profiles:
+      - full
+      - observability
     depends_on:
       - prometheus
       - tempo
@@ -101,6 +119,9 @@ services:
   tempo-init:
     # Need to chown first
     # https://github.com/grafana/tempo/issues/3601
+    profiles:
+      - full
+      - observability
     image: ubuntu
     user: root
     entrypoint:
@@ -110,6 +131,9 @@ services:
     volumes:
       - tempo:/var/tempo
   tempo:
+    profiles:
+      - full
+      - observability
     image: "grafana/tempo"
     command: ["-config.file=/etc/tempo.yml"]
     depends_on:
@@ -119,6 +143,9 @@ services:
       - tempo:/tmp/tempo
 
   grafana:
+    profiles:
+      - full
+      - observability
     image: "grafana/grafana"
     environment:
       - GF_AUTH_ANONYMOUS_ENABLED=true
