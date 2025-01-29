@@ -55,7 +55,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  send coverage:
+  send_cover:
     runs-on: ubuntu-latest
     needs:
       - test
@@ -74,7 +74,7 @@ jobs:
           files: profile.out
           fail_ci_if_error: true
 
-  test upload:
+  test_upload:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
