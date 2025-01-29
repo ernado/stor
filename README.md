@@ -1,5 +1,8 @@
 # stor
 
+[![codecov](https://codecov.io/gh/ernado/stor/graph/badge.svg?token=ULW7VAOOSP)](https://codecov.io/gh/ernado/stor)
+[![e2e](https://github.com/ernado/stor/actions/workflows/e2e.yml/badge.svg)](https://github.com/ernado/stor/actions/workflows/e2e.yml)
+
 Toy file storage. Not for production use.
 
 ![stor.svg](stor.svg)
