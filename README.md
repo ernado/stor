@@ -9,7 +9,7 @@ Toy file storage. Not for production use.
 Run with observability stack:
 
 ```bash
-docker compose up -d
+docker compose --profile full up -d
 ```
 
 Grafana is available at http://localhost:3000.
@@ -56,5 +56,5 @@ checksum match
 ## Cleanup
 
 ```
-docker compose down --timeout 1 --volumes
+docker compose --profile full down --timeout 1 --volumes
 ```
