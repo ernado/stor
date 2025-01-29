@@ -92,7 +92,10 @@ func main() {
 
 		// Initialize and instrument http server.
 		clientConstructor := front.NewDefaultNodeClientConstructor(httpClient, m.TracerProvider())
-		handler := front.NewHandler(ctx, clientConstructor, storage, m.TracerProvider())
+		handler, err := front.NewHandler(ctx, clientConstructor, storage, m.TracerProvider(), m.MeterProvider())
+		if err != nil {
+			return errors.Wrap(err, "create handler")
+		}
 		srv := &http.Server{
 			Addr:              ":8080",
 			BaseContext:       func(listener net.Listener) context.Context { return ctx },

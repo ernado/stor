@@ -4,15 +4,18 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/go-faster/errors"
 	"github.com/go-faster/sdk/zctx"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -38,17 +41,25 @@ type Node struct {
 	BaseURL string
 }
 
+type NodeStat struct {
+	BaseURL     string
+	TotalChunks int
+	TotalSize   int64
+}
+
 type HandlerStorage interface {
 	File(ctx context.Context, name string) (*File, error)
 	AddFile(ctx context.Context, file File) error
 	RemoveFile(ctx context.Context, name string) error
 	Nodes(ctx context.Context) ([]Node, error)
+	NodeStats(ctx context.Context) ([]NodeStat, error)
 	AddNode(ctx context.Context, node Node) error
 }
 
 type Handler struct {
 	mux     sync.Mutex
 	clients map[string]NodeClient
+	stat    []NodeStat
 
 	clientConstructor      NodeClientConstructor
 	storage                HandlerStorage
@@ -58,6 +69,9 @@ type Handler struct {
 	httpClient             node.HTTPClient
 	tracer                 trace.Tracer
 	baseCtx                context.Context
+
+	nodeTotalSize   metric.Int64Observable
+	nodeTotalChunks metric.Int64Observable
 }
 
 type NodeClient interface {
@@ -106,12 +120,60 @@ func (h *Handler) FetchNodes(ctx context.Context) error {
 	return nil
 }
 
+func (h *Handler) UpdateNodeStats(ctx context.Context) error {
+	ctx, span := h.tracer.Start(ctx, "handler.UpdateNodeStats")
+	defer span.End()
+
+	stats, err := h.storage.NodeStats(ctx)
+	if err != nil {
+		return errors.Wrap(err, "fetch stats")
+	}
+
+	h.mux.Lock()
+	defer h.mux.Unlock()
+
+	h.stat = stats
+
+	return nil
+}
+
+func (h *Handler) NodeStatUpdater(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := h.UpdateNodeStats(ctx); err != nil {
+				zctx.From(ctx).Warn("Failed to update node stats", zap.Error(err))
+			}
+		}
+	}
+}
+
 // NextClient returns next client to use for uploads.
 func (h *Handler) NextClient() NodeClient {
 	h.mux.Lock()
 	defer h.mux.Unlock()
 
-	for _, client := range h.clients {
+	var (
+		leastSize     int64
+		leastSizeNode string
+	)
+	for _, stat := range h.stat {
+		if leastSizeNode == "" || stat.TotalSize < leastSize {
+			leastSize = stat.TotalSize
+			leastSizeNode = stat.BaseURL
+		}
+	}
+
+	client, ok := h.clients[leastSizeNode]
+	if ok {
+		return client
+	}
+	// No stats or unknown client, pick random.
+	for _, client = range h.clients {
 		return client
 	}
 
@@ -325,16 +387,58 @@ func NewHandler(
 	clientConstructor NodeClientConstructor,
 	storage HandlerStorage,
 	tracerProvider trace.TracerProvider,
-) http.Handler {
+	meterProvider metric.MeterProvider,
+) (http.Handler, error) {
+	const name = "stor.front"
 	h := &Handler{
 		storage:                storage,
 		maxMultipartFormMemory: 32 * 1024 * 1024,
 		chunksPerFile:          6,
-		tracer:                 tracerProvider.Tracer("stor.front"),
+		tracer:                 tracerProvider.Tracer(name),
 		baseCtx:                baseCtx,
 		clients:                make(map[string]NodeClient),
 		clientConstructor:      clientConstructor,
 	}
+	{
+		// Initialize metrics.
+		meter := meterProvider.Meter(name)
+		var err error
+		if h.nodeTotalChunks, err = meter.Int64ObservableGauge("node.total_chunks"); err != nil {
+			return nil, errors.Wrap(err, "node.total_chunks")
+		}
+		if h.nodeTotalSize, err = meter.Int64ObservableGauge("node.total_size"); err != nil {
+			return nil, errors.Wrap(err, "node.total_size")
+		}
+		if _, err := meter.RegisterCallback(func(ctx context.Context, observer metric.Observer) error {
+			stats, err := h.storage.NodeStats(ctx)
+			if err != nil {
+				return errors.Wrap(err, "fetch stats")
+			}
+			for _, stat := range stats {
+				u, err := url.Parse(stat.BaseURL)
+				if err != nil {
+					return errors.Wrap(err, "parse baseURL")
+				}
+				host, _, err := net.SplitHostPort(u.Host)
+				if err != nil {
+					return errors.Wrap(err, "split host port")
+				}
+				attrs := metric.WithAttributes(
+					attribute.String("node", host),
+				)
+				observer.ObserveInt64(h.nodeTotalChunks, int64(stat.TotalChunks), attrs)
+				observer.ObserveInt64(h.nodeTotalSize, stat.TotalSize, attrs)
+			}
+
+			return nil
+		},
+			h.nodeTotalChunks,
+			h.nodeTotalSize,
+		); err != nil {
+			return nil, errors.Wrap(err, "register callback")
+		}
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -342,5 +446,6 @@ func NewHandler(
 	mux.HandleFunc("/register", h.register)
 	mux.HandleFunc("/download/{fileName}", h.download)
 	mux.HandleFunc("/upload", h.upload)
-	return mux
+	go h.NodeStatUpdater(baseCtx)
+	return mux, nil
 }

@@ -3,6 +3,7 @@ package front
 import (
 	"context"
 	"path"
+	"slices"
 
 	"github.com/go-faster/errors"
 	"github.com/google/uuid"
@@ -26,6 +27,70 @@ func NewYDBStorage(db *ydb.Driver, tracer trace.Tracer) *YDBStorage {
 type YDBStorage struct {
 	db     *ydb.Driver
 	tracer trace.Tracer
+}
+
+func (y YDBStorage) NodeStats(ctx context.Context) ([]NodeStat, error) {
+	ctx, span := y.tracer.Start(ctx, "meta.NodeStats")
+	defer span.End()
+
+	nodes, err := y.Nodes(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "get nodes")
+	}
+
+	stats := make(map[string]NodeStat)
+	for _, node := range nodes {
+		stats[node.BaseURL] = NodeStat{
+			BaseURL: node.BaseURL,
+		}
+	}
+
+	if err := y.db.Query().Do(ctx,
+		func(ctx context.Context, s query.Session) error {
+			res, err := s.Query(ctx,
+				`SELECT node, count(1) as total_count, sum(size) as total_size FROM chunks GROUP BY node ORDER BY total_size DESC;`,
+			)
+			for rs, err := range res.ResultSets(ctx) {
+				if err != nil {
+					return errors.Wrap(err, "result set")
+				}
+				for row, err := range rs.Rows(ctx) {
+					if err != nil {
+						return errors.Wrap(err, "row")
+					}
+					var v struct {
+						Node  string `sql:"node"`
+						Count uint64 `sql:"total_count"`
+						Size  uint64 `sql:"total_size"`
+					}
+					if err := row.ScanStruct(&v); err != nil {
+						return errors.Wrap(err, "scan")
+					}
+					stats[v.Node] = NodeStat{
+						BaseURL:     v.Node,
+						TotalChunks: int(v.Count),
+						TotalSize:   int64(v.Size),
+					}
+				}
+			}
+			if err != nil {
+				return errors.Wrap(err, "query")
+			}
+			return nil
+		},
+	); err != nil {
+		return nil, errors.Wrap(err, "do")
+	}
+
+	var out []NodeStat
+	for _, stat := range stats {
+		out = append(out, stat)
+	}
+	slices.SortFunc(out, func(a, b NodeStat) int {
+		return int(a.TotalSize - b.TotalSize)
+	})
+
+	return out, nil
 }
 
 func (y YDBStorage) RemoveFile(ctx context.Context, name string) error {

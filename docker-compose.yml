@@ -25,8 +25,8 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4317
       - OTEL_GO_X_DEPRECATED_RUNTIME_METRICS=false
       - OTEL_GO_X_RESOURCE=true
-      - OTEL_METRIC_EXPORT_INTERVAL=5000
-      - OTEL_METRIC_EXPORT_TIMEOUT=2500
+      - OTEL_METRIC_EXPORT_INTERVAL=1000
+      - OTEL_METRIC_EXPORT_TIMEOUT=500
 
   # storage nodes
   node:
@@ -48,8 +48,8 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4317
       - OTEL_GO_X_DEPRECATED_RUNTIME_METRICS=false
       - OTEL_GO_X_RESOURCE=true
-      - OTEL_METRIC_EXPORT_INTERVAL=5000
-      - OTEL_METRIC_EXPORT_TIMEOUT=2500
+      - OTEL_METRIC_EXPORT_INTERVAL=1000
+      - OTEL_METRIC_EXPORT_TIMEOUT=500
 
   # Database for metadata
   # https://ydb.tech/docs/ru/quickstart
@@ -90,6 +90,7 @@ services:
     image: "ghcr.io/go-faster/prom/prometheus:v3.1.0"
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--web.enable-otlp-receiver"
     restart: unless-stopped
     volumes:
       - ./_hack/prometheus.yml:/etc/prometheus/prometheus.yml

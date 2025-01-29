@@ -14,13 +14,35 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel/trace/noop"
+	noopMeter "go.opentelemetry.io/otel/metric/noop"
+	noopTracer "go.opentelemetry.io/otel/trace/noop"
 )
 
 type inMemoryStorage struct {
 	files map[string]File
 	nodes map[string]Node
 	mux   sync.Mutex
+}
+
+func (s *inMemoryStorage) NodeStats(ctx context.Context) ([]NodeStat, error) {
+	s.mux.Lock()
+	defer s.mux.Unlock()
+	var stats []NodeStat
+	for _, node := range s.nodes {
+		stat := NodeStat{
+			BaseURL: node.BaseURL,
+		}
+		for _, file := range s.files {
+			for _, chunk := range file.Chunks {
+				if chunk.NodeBaseURL == node.BaseURL {
+					stat.TotalChunks++
+					stat.TotalSize += chunk.Size
+				}
+			}
+		}
+		stats = append(stats, stat)
+	}
+	return stats, nil
 }
 
 func (s *inMemoryStorage) File(_ context.Context, name string) (*File, error) {
@@ -131,13 +153,14 @@ func newInMemoryNodes() *inMemoryNodes {
 
 func TestHandler(t *testing.T) {
 	var (
-		ctx     = context.Background()
-		stor    = newInMemoryStorage()
-		nodes   = newInMemoryNodes()
-		handler = NewHandler(ctx, nodes, stor, noop.NewTracerProvider())
-		server  = httptest.NewServer(handler)
-		client  = server.Client()
+		ctx   = context.Background()
+		stor  = newInMemoryStorage()
+		nodes = newInMemoryNodes()
 	)
+	handler, err := NewHandler(ctx, nodes, stor, noopTracer.NewTracerProvider(), noopMeter.NewMeterProvider())
+	require.NoError(t, err)
+	server := httptest.NewServer(handler)
+	client := server.Client()
 
 	t.Log("Register nodes")
 	for _, baseURL := range []string{
