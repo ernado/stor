@@ -101,42 +101,6 @@ func (c *DefaultNodeClientConstructor) NewClient(baseURL string) NodeClient {
 	return node.NewClient(baseURL, c.HTTPClient, c.TracerProvider)
 }
 
-func (h *Handler) FetchNodes(ctx context.Context) error {
-	ctx, span := h.tracer.Start(ctx, "handler.FetchNodes")
-	defer span.End()
-
-	clients, err := h.storage.Nodes(ctx)
-	if err != nil {
-		return errors.Wrap(err, "fetch clients")
-	}
-
-	h.mux.Lock()
-	defer h.mux.Unlock()
-
-	for _, client := range clients {
-		h.clients[client.BaseURL] = h.newClient(client.BaseURL)
-	}
-
-	return nil
-}
-
-func (h *Handler) UpdateNodeStats(ctx context.Context) error {
-	ctx, span := h.tracer.Start(ctx, "handler.UpdateNodeStats")
-	defer span.End()
-
-	stats, err := h.storage.NodeStats(ctx)
-	if err != nil {
-		return errors.Wrap(err, "fetch stats")
-	}
-
-	h.mux.Lock()
-	defer h.mux.Unlock()
-
-	h.stat = stats
-
-	return nil
-}
-
 // selectLeastFilledNodes implement algorithm of balancing data between nodes.
 //
 // We select N nodes with the least amount of data to write new chunks.
@@ -223,10 +187,6 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 	zctx.From(ctx).Info("Registered node",
 		zap.String("baseURL", baseURL),
 	)
-	if err := h.FetchNodes(ctx); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 }
 
 func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
@@ -387,6 +347,30 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprintln(w, u.String())
 }
 
+func (h *Handler) observeMetrics(ctx context.Context, observer metric.Observer) error {
+	stats, err := h.storage.NodeStats(ctx)
+	if err != nil {
+		return errors.Wrap(err, "fetch stats")
+	}
+	for _, stat := range stats {
+		u, err := url.Parse(stat.BaseURL)
+		if err != nil {
+			return errors.Wrap(err, "parse baseURL")
+		}
+		host, _, err := net.SplitHostPort(u.Host)
+		if err != nil {
+			return errors.Wrap(err, "split host port")
+		}
+		attrs := metric.WithAttributes(
+			attribute.String("node", host),
+		)
+		observer.ObserveInt64(h.nodeTotalChunks, int64(stat.TotalChunks), attrs)
+		observer.ObserveInt64(h.nodeTotalSize, stat.TotalSize, attrs)
+	}
+
+	return nil
+}
+
 func NewHandler(
 	baseCtx context.Context,
 	clientConstructor NodeClientConstructor,
@@ -414,32 +398,7 @@ func NewHandler(
 		if h.nodeTotalSize, err = meter.Int64ObservableGauge("node.total_size"); err != nil {
 			return nil, errors.Wrap(err, "node.total_size")
 		}
-		if _, err := meter.RegisterCallback(func(ctx context.Context, observer metric.Observer) error {
-			stats, err := h.storage.NodeStats(ctx)
-			if err != nil {
-				return errors.Wrap(err, "fetch stats")
-			}
-			for _, stat := range stats {
-				u, err := url.Parse(stat.BaseURL)
-				if err != nil {
-					return errors.Wrap(err, "parse baseURL")
-				}
-				host, _, err := net.SplitHostPort(u.Host)
-				if err != nil {
-					return errors.Wrap(err, "split host port")
-				}
-				attrs := metric.WithAttributes(
-					attribute.String("node", host),
-				)
-				observer.ObserveInt64(h.nodeTotalChunks, int64(stat.TotalChunks), attrs)
-				observer.ObserveInt64(h.nodeTotalSize, stat.TotalSize, attrs)
-			}
-
-			return nil
-		},
-			h.nodeTotalChunks,
-			h.nodeTotalSize,
-		); err != nil {
+		if _, err := meter.RegisterCallback(h.observeMetrics); err != nil {
 			return nil, errors.Wrap(err, "register callback")
 		}
 	}
