@@ -1,3 +1,4 @@
+// Package integration wraps integration test utilities.
 package integration
 
 import (

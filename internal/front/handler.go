@@ -195,7 +195,7 @@ func (h *Handler) download(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	ctx, span := h.tracer.Start(r.Context(), "handler.Upload")
+	ctx, span := h.tracer.Start(ctx, "handler.Upload")
 	defer span.End()
 
 	if err := h.FetchNodes(ctx); err != nil {
@@ -313,11 +313,11 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 	u := &url.URL{
 		Scheme: "http",
 		Host:   r.Host,
-		Path:   filepath.Join("/download", fileHeader.Filename),
+		Path:   filepath.Join("download", fileHeader.Filename),
 	}
 
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, u.String())
+	_, _ = fmt.Fprintln(w, u.String())
 }
 
 func NewHandler(

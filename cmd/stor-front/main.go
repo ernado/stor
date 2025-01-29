@@ -94,8 +94,9 @@ func main() {
 		clientConstructor := front.NewDefaultNodeClientConstructor(httpClient, m.TracerProvider())
 		handler := front.NewHandler(ctx, clientConstructor, storage, m.TracerProvider())
 		srv := &http.Server{
-			Addr:        ":8080",
-			BaseContext: func(listener net.Listener) context.Context { return ctx },
+			Addr:              ":8080",
+			BaseContext:       func(listener net.Listener) context.Context { return ctx },
+			ReadHeaderTimeout: time.Second,
 			Handler: otelhttp.NewHandler(handler, "",
 				otelhttp.WithTracerProvider(m.TracerProvider()),
 				otelhttp.WithMeterProvider(m.MeterProvider()),

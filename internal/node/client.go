@@ -25,9 +25,9 @@ func (c *Client) BaseURL() string {
 	return c.baseURL
 }
 
-func NewClient(baseURL string, http HTTPClient, tracerProvider trace.TracerProvider) *Client {
+func NewClient(baseURL string, httpClient HTTPClient, tracerProvider trace.TracerProvider) *Client {
 	return &Client{
-		http:    http,
+		http:    httpClient,
 		baseURL: baseURL,
 		trace:   tracerProvider.Tracer("stor.node.client"),
 	}
@@ -77,7 +77,7 @@ func (c *Client) Read(ctx context.Context, id uuid.UUID, w io.Writer) (rerr erro
 		span.End()
 	}()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url(id), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.url(id), http.NoBody)
 	if err != nil {
 		return errors.Wrap(err, "create request")
 	}
@@ -110,7 +110,7 @@ func (c *Client) Delete(ctx context.Context, id uuid.UUID) (rerr error) {
 		span.End()
 	}()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.url(id), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.url(id), http.NoBody)
 	if err != nil {
 		return errors.Wrap(err, "create request")
 	}

@@ -55,7 +55,8 @@ func run() error {
 		if err != nil {
 			return errors.Wrap(err, "parse size")
 		}
-		rnd := rand.New(rand.NewSource(0)) // Fixed seed for reproducibility.
+		// Fixed seed for reproducibility.
+		rnd := rand.New(rand.NewSource(0)) // #nosec G404
 		if _, err := io.CopyN(f, rnd, int64(sizeBytes)); err != nil {
 			return errors.Wrap(err, "generate file")
 		}
@@ -169,7 +170,7 @@ func run() error {
 	fmt.Printf("original sha256: %x\n", originalSHA256)
 
 	// Compute sha256(downloaded).
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uploadedLink, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uploadedLink, http.NoBody)
 	if err != nil {
 		return errors.Wrap(err, "create download request")
 	}

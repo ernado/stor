@@ -150,7 +150,7 @@ func TestHandler(t *testing.T) {
 		u.RawQuery = url.Values{
 			"baseURL": []string{baseURL},
 		}.Encode()
-		req, err := http.NewRequest(http.MethodPost, u.String(), nil)
+		req, err := http.NewRequest(http.MethodPost, u.String(), http.NoBody)
 		require.NoError(t, err)
 
 		resp, err := client.Do(req)
@@ -189,7 +189,7 @@ func TestHandler(t *testing.T) {
 	}
 	{
 		// Download file.
-		req, err := http.NewRequest(http.MethodGet, server.URL+"/download/hello.txt", nil)
+		req, err := http.NewRequest(http.MethodGet, server.URL+"/download/hello.txt", http.NoBody)
 		require.NoError(t, err)
 
 		resp, err := client.Do(req)

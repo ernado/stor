@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/go-faster/errors"
 	"github.com/go-faster/sdk/app"
@@ -26,8 +27,9 @@ func main() {
 		handler := node.NewHandler(chunks)
 		// Initialize and instrument http server.
 		srv := &http.Server{
-			Addr:        ":" + listenPort,
-			BaseContext: func(listener net.Listener) context.Context { return ctx },
+			Addr:              ":" + listenPort,
+			ReadHeaderTimeout: time.Second,
+			BaseContext:       func(listener net.Listener) context.Context { return ctx },
 			Handler: otelhttp.NewHandler(handler, "",
 				otelhttp.WithTracerProvider(m.TracerProvider()),
 				otelhttp.WithMeterProvider(m.MeterProvider()),

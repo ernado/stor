@@ -85,7 +85,7 @@ func (c *Chunks) Write(ctx context.Context, id uuid.UUID, r io.Reader) (rerr err
 		return errors.Wrap(err, "mkdir")
 	}
 
-	f, err := os.Create(filepath.Join(targetDir, id.String()))
+	f, err := os.Create(filepath.Join(targetDir, id.String())) // #nosec G304
 	if err != nil {
 		return errors.Wrap(err, "create")
 	}
@@ -126,7 +126,7 @@ func (c *Chunks) Read(ctx context.Context, id uuid.UUID, w io.Writer) (rerr erro
 	}()
 
 	filePath := filepath.Join(getTargetDir(c.dir, id), id.String())
-	f, err := os.Open(filePath)
+	f, err := os.Open(filePath) // #nosec G304
 	if err != nil {
 		return errors.Wrap(err, "open")
 	}

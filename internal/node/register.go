@@ -32,7 +32,7 @@ func Register(ctx context.Context, httpClient HTTPClient, listenPort string) err
 			"baseURL": []string{baseURL.String()},
 		}.Encode(),
 	}
-	req, err := http.NewRequest(http.MethodPut, u.String(), nil)
+	req, err := http.NewRequest(http.MethodPut, u.String(), http.NoBody)
 	if err != nil {
 		return errors.Wrap(err, "create request")
 	}
