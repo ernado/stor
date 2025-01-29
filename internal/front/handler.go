@@ -270,12 +270,6 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 	ctx, span := h.tracer.Start(ctx, "handler.Upload")
 	defer span.End()
 
-	if err := h.FetchNodes(ctx); err != nil {
-		// Can be done in background.
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
 	if err := r.ParseMultipartForm(h.maxMultipartFormMemory); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
