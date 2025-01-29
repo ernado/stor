@@ -7,6 +7,21 @@ Toy file storage. Not for production use.
 
 ![stor.svg](stor.svg)
 
+```mermaid
+sequenceDiagram
+    node->>front: register
+    front->>ydb: register
+    ydb-->>front: ok
+    front-->>node: ok
+    user->>front: upload
+    front->>ydb: create file
+    front->>ydb: create chunks
+    front->>node: upload chunks
+    node->>front: ok
+    ydb-->>front: ok
+    front-->>user: upload link
+```
+
 ## Running
 
 Run with observability stack:
