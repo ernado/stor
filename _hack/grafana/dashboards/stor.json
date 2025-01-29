@@ -18,7 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 3,
+  "id": 2,
   "links": [],
   "panels": [
     {
@@ -175,29 +175,99 @@
         "uid": "tempo"
       },
       "fieldConfig": {
-        "defaults": {},
-        "overrides": []
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Start time"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 307
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Service"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 304
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Trace ID"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 343
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Name"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 983
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
-        "h": 10,
+        "h": 13,
         "w": 24,
         "x": 0,
         "y": 14
       },
-      "id": 5,
+      "id": 6,
       "options": {
-        "spanFilters": {
-          "criticalPathOnly": false,
-          "matchesOnly": false,
-          "serviceNameOperator": "=",
-          "spanNameOperator": "=",
-          "tags": [
-            {
-              "id": "53cd7948-6c5",
-              "operator": "="
-            }
-          ]
-        }
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": []
       },
       "pluginVersion": "11.5.0",
       "targets": [
@@ -210,7 +280,8 @@
             {
               "id": "cd0dce76",
               "operator": "=",
-              "scope": "span"
+              "scope": "span",
+              "tag": ""
             },
             {
               "id": "service-name",
@@ -234,13 +305,15 @@
             }
           ],
           "limit": 20,
+          "query": "",
           "queryType": "traceqlSearch",
           "refId": "A",
+          "serviceMapQuery": "",
           "tableType": "traces"
         }
       ],
-      "title": "Traces",
-      "type": "traces"
+      "title": "New Panel",
+      "type": "table"
     },
     {
       "datasource": {
@@ -255,7 +328,7 @@
         "h": 10,
         "w": 12,
         "x": 0,
-        "y": 24
+        "y": 27
       },
       "id": 3,
       "options": {
@@ -299,7 +372,7 @@
         "h": 10,
         "w": 12,
         "x": 12,
-        "y": 24
+        "y": 27
       },
       "id": 4,
       "options": {
@@ -359,6 +432,6 @@
   "timezone": "browser",
   "title": "stor",
   "uid": "stor",
-  "version": 2,
+  "version": 1,
   "weekStart": ""
 }
