@@ -5,6 +5,8 @@
 
 Toy file storage. Not for production use.
 
+https://github.com/user-attachments/assets/c61de5dc-f518-4c28-b4e3-695c06838fbf
+
 ![stor.svg](stor.svg)
 
 ```mermaid
