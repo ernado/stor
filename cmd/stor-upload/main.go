@@ -21,25 +21,18 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func run() error {
-	var arg struct {
-		File         string
-		Name         string
-		ServerURL    string
-		Check        bool
-		RandomPrefix bool
-		Generate     bool
-		GenerateSize string
-	}
-	flag.StringVar(&arg.File, "file", "", "file to upload")
-	flag.StringVar(&arg.Name, "name", "", "name of the file (defaults to file base name)")
-	flag.StringVar(&arg.ServerURL, "server-url", "http://localhost:8080", "server URL")
-	flag.BoolVar(&arg.Check, "check", false, "download and check file checksum")
-	flag.BoolVar(&arg.RandomPrefix, "rnd", false, "use random prefix for the file name")
-	flag.StringVar(&arg.GenerateSize, "gen-size", "100M", "generate file of given size")
-	flag.BoolVar(&arg.Generate, "gen", false, "generate random file to temp dir")
-	flag.Parse()
+type Options struct {
+	Count        int
+	File         string
+	Name         string
+	ServerURL    string
+	Check        bool
+	RandomPrefix bool
+	Generate     bool
+	GenerateSize string
+}
 
+func do(arg Options) error {
 	if arg.Generate {
 		// Generate random file with specified size.
 		f, err := os.CreateTemp("", "stor-upload-*.bin")
@@ -200,6 +193,27 @@ func run() error {
 		return errors.New("checksum mismatch")
 	} else {
 		fmt.Println("checksum match")
+	}
+
+	return nil
+}
+
+func run() error {
+	var arg Options
+	flag.IntVar(&arg.Count, "n", 1, "number of files to upload")
+	flag.StringVar(&arg.File, "file", "", "file to upload")
+	flag.StringVar(&arg.Name, "name", "", "name of the file (defaults to file base name)")
+	flag.StringVar(&arg.ServerURL, "server-url", "http://localhost:8080", "server URL")
+	flag.BoolVar(&arg.Check, "check", false, "download and check file checksum")
+	flag.BoolVar(&arg.RandomPrefix, "rnd", false, "use random prefix for the file name")
+	flag.StringVar(&arg.GenerateSize, "gen-size", "100M", "generate file of given size")
+	flag.BoolVar(&arg.Generate, "gen", false, "generate random file to temp dir")
+	flag.Parse()
+
+	for i := 0; i < arg.Count; i++ {
+		if err := do(arg); err != nil {
+			return errors.Wrap(err, "do")
+		}
 	}
 
 	return nil
