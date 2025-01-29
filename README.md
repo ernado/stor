@@ -15,7 +15,7 @@ Run with observability stack:
 docker compose --profile full up -d
 ```
 
-Grafana is available at http://localhost:3000.
+Grafana dashboard is available at http://localhost:3000/d/stor/stor.
 
 Run with minimal setup:
 ```bash
