@@ -89,6 +89,8 @@ downloaded sha256: 3e6d6d836b6298d3540df54da03bf6c4d980a749890abcf9af6f199f58ff0
 checksum match
 ```
 
+![cast.svg](cast.svg)
+
 ## Cleanup
 
 ```
