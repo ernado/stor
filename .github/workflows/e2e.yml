@@ -107,7 +107,7 @@ jobs:
 
       # start docker compose
       - name: Start docker compose
-        run: docker-compose --profile full  up -d
+        run: docker compose --profile full  up -d
 
       - name: Test upload
         run: go run ./cmd/stor-upload -gen -gen-size 1GB --check
