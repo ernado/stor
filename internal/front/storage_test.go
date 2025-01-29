@@ -119,7 +119,7 @@ func TestIntegrationYDBStorage(t *testing.T) {
 		}
 		stats, err := storage.NodeStats(ctx)
 		require.NoError(t, err, "fetch node stats")
-		require.Len(t, stats, 2)
+		require.Len(t, stats, 3)
 		for _, file := range files {
 			f, err := storage.File(ctx, file.Name)
 			require.NoError(t, err)
