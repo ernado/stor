@@ -73,6 +73,8 @@ jobs:
         with:
           files: profile.out
           fail_ci_if_error: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   test_upload:
     runs-on: ubuntu-latest
