@@ -9,17 +9,28 @@ Toy file storage. Not for production use.
 
 ```mermaid
 sequenceDiagram
+    actor user
     node->>front: register
     front->>ydb: register
     ydb-->>front: ok
     front-->>node: ok
     user->>front: upload
+    front->>ydb: get nodes
+    ydb-->>front: nodes
     front->>ydb: create file
     front->>ydb: create chunks
     front->>node: upload chunks
-    node->>front: ok
+    node-->>front: ok
     ydb-->>front: ok
     front-->>user: upload link
+
+    user->>front: download
+    front->>ydb: get chunks
+    ydb-->>front: chunks
+    front->>node: download chunks
+    node-->>front: chunks
+    front--front: assemble file
+    front-->>user: file
 ```
 
 ## Running
