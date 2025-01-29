@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
-	"time"
 
 	"github.com/go-faster/errors"
 	"github.com/go-faster/sdk/zctx"
@@ -136,21 +135,6 @@ func (h *Handler) UpdateNodeStats(ctx context.Context) error {
 	h.stat = stats
 
 	return nil
-}
-
-func (h *Handler) NodeStatUpdater(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if err := h.UpdateNodeStats(ctx); err != nil {
-				zctx.From(ctx).Warn("Failed to update node stats", zap.Error(err))
-			}
-		}
-	}
 }
 
 // selectLeastFilledNodes implement algorithm of balancing data between nodes.
@@ -473,6 +457,5 @@ func NewHandler(
 	mux.HandleFunc("/register", h.register)
 	mux.HandleFunc("/download/{fileName}", h.download)
 	mux.HandleFunc("/upload", h.upload)
-	go h.NodeStatUpdater(baseCtx)
 	return mux, nil
 }
