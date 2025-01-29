@@ -7,12 +7,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math/rand"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/dustin/go-humanize"
 	"github.com/go-faster/errors"
 	"github.com/google/uuid"
 	"github.com/schollz/progressbar/v3"
@@ -26,14 +28,38 @@ func run() error {
 		ServerURL    string
 		Check        bool
 		RandomPrefix bool
+		Generate     bool
+		GenerateSize string
 	}
 	flag.StringVar(&arg.File, "file", "", "file to upload")
 	flag.StringVar(&arg.Name, "name", "", "name of the file (defaults to file base name)")
 	flag.StringVar(&arg.ServerURL, "server-url", "http://localhost:8080", "server URL")
 	flag.BoolVar(&arg.Check, "check", false, "download and check file checksum")
 	flag.BoolVar(&arg.RandomPrefix, "rnd", false, "use random prefix for the file name")
+	flag.StringVar(&arg.GenerateSize, "gen-size", "100M", "generate file of given size")
+	flag.BoolVar(&arg.Generate, "gen", false, "generate random file to temp dir")
 	flag.Parse()
 
+	if arg.Generate {
+		// Generate random file with specified size.
+		f, err := os.CreateTemp("", "stor-upload-*.bin")
+		if err != nil {
+			return errors.Wrap(err, "create temp file")
+		}
+		defer func() {
+			_ = f.Close()
+			_ = os.Remove(f.Name())
+		}()
+		arg.File = f.Name()
+		sizeBytes, err := humanize.ParseBytes(arg.GenerateSize)
+		if err != nil {
+			return errors.Wrap(err, "parse size")
+		}
+		rnd := rand.New(rand.NewSource(0)) // Fixed seed for reproducibility.
+		if _, err := io.CopyN(f, rnd, int64(sizeBytes)); err != nil {
+			return errors.Wrap(err, "generate file")
+		}
+	}
 	if arg.File == "" {
 		return errors.New("file is required")
 	}
