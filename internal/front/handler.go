@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -152,32 +153,57 @@ func (h *Handler) NodeStatUpdater(ctx context.Context) {
 	}
 }
 
-// NextClient returns next client to use for uploads.
-func (h *Handler) NextClient() NodeClient {
-	h.mux.Lock()
-	defer h.mux.Unlock()
+// selectLeastFilledNodes implement algorithm of balancing data between nodes.
+//
+// We select N nodes with the least amount of data to write new chunks.
+// If there are fewer nodes than N, we return all nodes.
+//
+// Returned slice is guaranteed to be of length N if len(nodes) > 0.
+// If len(nodes) == 0, nil is returned.
+func (h *Handler) selectLeastFilledNodes(nodes []NodeStat, n int) []NodeStat {
+	if len(nodes) == 0 {
+		return nil
+	}
 
-	var (
-		leastSize     int64
-		leastSizeNode string
-	)
-	for _, stat := range h.stat {
-		if leastSizeNode == "" || stat.TotalSize < leastSize {
-			leastSize = stat.TotalSize
-			leastSizeNode = stat.BaseURL
+	// Sort nodes by total size.
+	slices.SortFunc(nodes, func(a, b NodeStat) int {
+		return int(a.TotalSize - b.TotalSize)
+	})
+
+	if n < len(nodes) {
+		// Return N nodes that has the least total size.
+		return nodes[:n]
+	}
+
+	// Too few nodes, return all.
+	var out []NodeStat
+	for {
+		for _, stat := range nodes {
+			if len(out) == n {
+				return out
+			}
+			out = append(out, stat)
 		}
 	}
+}
 
-	client, ok := h.clients[leastSizeNode]
-	if ok {
-		return client
-	}
-	// No stats or unknown client, pick random.
-	for _, client = range h.clients {
-		return client
+// NextClients returns next N clients with least amount of data.
+func (h *Handler) NextClients(ctx context.Context, n int) ([]NodeClient, error) {
+	stat, err := h.storage.NodeStats(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "node stats")
 	}
 
-	return nil
+	nodes := h.selectLeastFilledNodes(stat, n)
+	if len(nodes) == 0 {
+		return nil, errors.New("no nodes")
+	}
+
+	clients := make([]NodeClient, len(nodes))
+	for i, v := range nodes {
+		clients[i] = h.GetClient(v.BaseURL)
+	}
+	return clients, nil
 }
 
 // GetClient creates or returns existing client to baseURL.
@@ -299,12 +325,13 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 	)
 	// Prepare chunks and allocate clients to storage nodes.
 	chunks := make([]Chunk, h.chunksPerFile)
+	clients, err := h.NextClients(ctx, h.chunksPerFile)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	for i := 0; i < h.chunksPerFile; i++ {
-		client := h.NextClient()
-		if client == nil {
-			http.Error(w, "no client", http.StatusInternalServerError)
-			return
-		}
+		client := clients[i]
 		chunks[i] = Chunk{
 			Index:       i,
 			ID:          uuid.New(),
