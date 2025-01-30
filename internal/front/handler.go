@@ -251,6 +251,10 @@ func (h *Handler) upload(w http.ResponseWriter, r *http.Request) {
 
 	// Split file into N chunks.
 	size := fileHeader.Size
+	if size < int64(h.chunksPerFile) {
+		http.Error(w, "file is too small", http.StatusBadRequest)
+		return
+	}
 	chunkSize := size / int64(h.chunksPerFile)
 	span.AddEvent("Splitting file into chunks",
 		trace.WithAttributes(

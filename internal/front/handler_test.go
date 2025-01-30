@@ -183,6 +183,31 @@ func TestHandler(t *testing.T) {
 	}
 
 	t.Log("Upload file")
+	t.Run("FileTooSmall", func(t *testing.T) {
+		// Write multipart form.
+		b := new(bytes.Buffer)
+		mw := multipart.NewWriter(b)
+		w, err := mw.CreateFormFile("upload", "hello.txt")
+		require.NoError(t, err)
+
+		// Write random file contents.
+		rnd := rand.New(rand.NewSource(1))
+		data := make([]byte, 5)
+		_, err = rnd.Read(data)
+		require.NoError(t, err)
+		_, err = w.Write(data)
+		require.NoError(t, err)
+
+		require.NoError(t, mw.Close())
+		req, err := http.NewRequest(http.MethodPost, server.URL+"/upload", b)
+		require.NoError(t, err)
+
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+
+		require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	})
 	var uploadedData []byte
 	{
 		// Write multipart form.
