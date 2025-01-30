@@ -59,7 +59,6 @@ type HandlerStorage interface {
 type Handler struct {
 	mux     sync.Mutex
 	clients map[string]NodeClient
-	stat    []NodeStat
 
 	clientConstructor      NodeClientConstructor
 	storage                HandlerStorage
