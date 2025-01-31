@@ -6,7 +6,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/go-faster/errors v0.7.1
-	github.com/go-faster/sdk v0.21.0
+	github.com/go-faster/sdk v0.22.0
 	github.com/google/uuid v1.6.0
 	github.com/schollz/progressbar/v3 v3.18.0
 	github.com/stretchr/testify v1.10.0
