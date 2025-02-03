@@ -12,7 +12,7 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/testcontainers/testcontainers-go v0.35.0
 	github.com/ydb-platform/ydb-go-sdk-otel v0.10.1
-	github.com/ydb-platform/ydb-go-sdk/v3 v3.99.2
+	github.com/ydb-platform/ydb-go-sdk/v3 v3.99.3
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.59.0
 	go.opentelemetry.io/otel v1.34.0
 	go.opentelemetry.io/otel/metric v1.34.0
