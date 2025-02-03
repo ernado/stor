@@ -210,8 +210,8 @@ github.com/ydb-platform/ydb-go-genproto v0.0.0-20241112172322-ea1f63298f77 h1:LY
 github.com/ydb-platform/ydb-go-genproto v0.0.0-20241112172322-ea1f63298f77/go.mod h1:Er+FePu1dNUieD+XTMDduGpQuCPssK5Q4BjF+IIXJ3I=
 github.com/ydb-platform/ydb-go-sdk-otel v0.10.1 h1:S01aZMBfG/Th16YWoWQs8mCxMC5ZmV82Upwc9Nn4GU4=
 github.com/ydb-platform/ydb-go-sdk-otel v0.10.1/go.mod h1:E8DxVOlm9ubIbAZ25gZI8s00Q5GnNJwV4XXlu63KPFE=
-github.com/ydb-platform/ydb-go-sdk/v3 v3.99.2 h1:RbSc9Jq7icwqadteSgJ3/f7O+ZG8zt694vXcpsFpo4w=
-github.com/ydb-platform/ydb-go-sdk/v3 v3.99.2/go.mod h1:knXehPLqrF/uBrYY0EbDtAMR+Ve8sAwIm/pNsfvbs7E=
+github.com/ydb-platform/ydb-go-sdk/v3 v3.99.3 h1:KxELBOo/THNL4S5UW708JvAueKGqK00PgI2fvn5T+00=
+github.com/ydb-platform/ydb-go-sdk/v3 v3.99.3/go.mod h1:knXehPLqrF/uBrYY0EbDtAMR+Ve8sAwIm/pNsfvbs7E=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.2.1/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yusufpapurcu/wmi v1.2.3 h1:E1ctvB7uKFMOJw3fdOW32DwGE9I7t++CRUEMKvFoFiw=
