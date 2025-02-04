@@ -401,7 +401,10 @@ func NewHandler(
 		if h.nodeTotalSize, err = meter.Int64ObservableGauge("node.total_size"); err != nil {
 			return nil, errors.Wrap(err, "node.total_size")
 		}
-		if _, err := meter.RegisterCallback(h.observeMetrics); err != nil {
+		if _, err := meter.RegisterCallback(h.observeMetrics,
+			h.nodeTotalChunks,
+			h.nodeTotalSize,
+		); err != nil {
 			return nil, errors.Wrap(err, "register callback")
 		}
 	}
